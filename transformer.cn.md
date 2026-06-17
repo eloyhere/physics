@@ -1,6 +1,6 @@
 # 🧠 Physics++：从矩阵计算到场论——Transformer 的信息场论证
 
-> *“在物理学中，我们不描述事物‘是什么’，而是描述它‘做什么’。现在，让我们对人工智能做同样的事。”*
+> *"在物理学中，我们不描述事物'是什么'，而是描述它'做什么'。现在，让我们对人工智能做同样的事。"*
 
 ---
 
@@ -18,49 +18,39 @@
 
 ### 2.1 注意力机制作为内积空间中的投影
 
-给定输入序列 $\mathbf{X} \in \mathbb{R}^{n \times d}$，自注意力机制计算：
+给定输入序列 `X ∈ R^(n×d)`，自注意力机制计算：
 
-$$
-\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) =
-\text{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}
-$$
+```
+Attention(Q, K, V) = softmax(Q·Kᵀ / √(dₖ)) · V
+```
 
 其中：
-- $\mathbf{Q} = \mathbf{X}\mathbf{W}_Q$
-- $\mathbf{K} = \mathbf{X}\mathbf{W}_K$
-- $\mathbf{V} = \mathbf{X}\mathbf{W}_V$
+- `Q = X·Wq`
+- `K = X·Wk`
+- `V = X·Wv`
 
-**定理 1（希尔伯特空间中的相似度）**  
-Token 之间的相似度由内积 $\langle \mathbf{a}, \mathbf{b} \rangle$ 度量。$\mathbf{Q}\mathbf{K}^T$ 的每一个元素正是投影空间中的内积。
+**定理 1（希尔伯特空间中的相似度）**：Token 之间的相似度由内积 `<a, b>` 度量。`Q·Kᵀ` 的每一个元素正是投影空间中的内积。
 
-**定理 2（Softmax 即玻尔兹曼分布）**  
-Softmax 与统计力学中的玻尔兹曼分布同构：
+**定理 2（Softmax 即玻尔兹曼分布）**：Softmax 与统计力学中的玻尔兹曼分布同构：
 
-$$
-\sigma(z)_i = \frac{e^{z_i}}{\sum_j e^{z_j}}
-\quad\Longleftrightarrow\quad
-P_i = \frac{e^{-E_i/kT}}{\sum_j e^{-E_j/kT}}
-$$
+```
+σ(z)ᵢ = exp(zᵢ) / Σⱼ exp(zⱼ)
+Pᵢ    = exp(-Eᵢ/kT) / Σⱼ exp(-Eⱼ/kT)
+```
 
-注意力权重 $\alpha_{ij}$ 本质上是 token 间**归一化后的相互作用能量**。
+注意力权重 `αᵢⱼ` 本质上是 token 间**归一化后的相互作用能量**。
 
 ---
 
 ### 2.2 多层堆叠作为迭代映射
 
-一个 $L$ 层的 Transformer 定义了一个递归映射 $\mathcal{F}$：
+一个 L 层的 Transformer 定义了一个递归映射 `F`：
 
-$$
-\mathbf{X}^{(l+1)} =
-\text{LayerNorm}\!\bigl(
-\mathbf{X}^{(l)} +
-\text{Attention}(\mathbf{X}^{(l)}) +
-\text{FFN}(\mathbf{X}^{(l)})
-\bigr)
-$$
+```
+X⁽ˡ⁺¹⁾ = LayerNorm( X⁽ˡ⁾ + Attention(X⁽ˡ⁾) + FFN(X⁽ˡ⁾) )
+```
 
-**定理 3（巴拿赫不动点定理）**  
-如果 $\mathcal{F}$ 是完备度量空间中的压缩映射，则存在唯一的不动点。残差连接保证了梯度流的持续存在，使得深层网络能够渐近逼近这一不动点。
+**定理 3（巴拿赫不动点定理）**：如果 `F` 是完备度量空间中的压缩映射，则存在唯一的不动点。残差连接保证了梯度流的持续存在，使得深层网络能够渐近逼近这一不动点。
 
 ---
 
@@ -68,16 +58,11 @@ $$
 
 ### 3.1 梯度场的数学定义
 
-对于标量场 $\phi : \mathbb{R}^n \to \mathbb{R}$：
+对于标量场 `φ: Rⁿ → R`，其梯度为：
 
-$$
-\nabla\phi =
-\left(
-\frac{\partial\phi}{\partial x_1},
-\ldots,
-\frac{\partial\phi}{\partial x_n}
-\right)
-$$
+```
+∇φ = ( ∂φ/∂x₁, ∂φ/∂x₂, ..., ∂φ/∂xₙ )
+```
 
 它指向函数值增长最快的方向。
 
@@ -85,24 +70,22 @@ $$
 
 ### 3.2 将注意力解释为离散梯度
 
-令 $\mathbf{A} = \text{softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})$。
+令 `A = softmax(Q·Kᵀ / √(dₖ))`。
 
 | 性质 | 物理含义 |
 |------|----------|
-| 行随机性 ($\sum_j A_{ij}=1$) | 马尔可夫转移矩阵 |
-| 非对称性 ($A_{ij} \neq A_{ji}$) | 有向信息流 |
+| 行随机性（`Σⱼ Aᵢⱼ = 1`） | 马尔可夫转移矩阵 |
+| 非对称性（`Aᵢⱼ ≠ Aⱼᵢ`） | 有向信息流 |
 
-**定理 4（注意力即离散梯度）**  
-定义一个隐式能量：
+**定理 4（注意力即离散梯度）**：定义一个隐式能量：
 
-$$
-E(\mathbf{X}) = -\tfrac{1}{2}\sum_{i,j} A_{ij} \|\mathbf{x}_i - \mathbf{x}_j\|^2
-$$
+```
+E(X) = -½ · Σᵢⱼ Aᵢⱼ · ‖xᵢ - xⱼ‖²
+```
 
-那么注意力更新 $\Delta\mathbf{x}_i = \sum_j A_{ij}\mathbf{v}_j$ 近似于 $-\nabla_{\mathbf{x}_i}E$。
+那么注意力更新 `Δxᵢ = Σⱼ Aᵢⱼ · vⱼ` 近似于 `-∇ₓᵢ E`。
 
-✅ **结论：**  
-注意力矩阵是一个**近似离散梯度场**，支配着信息流动。
+✅ **结论：** 注意力矩阵是一个**近似离散梯度场**，支配着信息流动。
 
 ---
 
@@ -112,9 +95,9 @@ $$
 
 每一层 Transformer 对应一个离散时间步：
 
-$$
-\mathbf{X}(t + \Delta t) = \mathbf{X}(t) + \mathbf{F}(\mathbf{X}(t))
-$$
+```
+X(t + Δt) = X(t) + F(X(t))
+```
 
 ---
 
@@ -122,22 +105,19 @@ $$
 
 经典波动方程：
 
-$$
-\frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u
-$$
+```
+∂²u/∂t² = c² · ∇²u
+```
 
-**定理 5（梯度的散度等于拉普拉斯）**  
-$\nabla \cdot (\nabla u) = \nabla^2 u$
+**定理 5（梯度的散度等于拉普拉斯）**：`∇ · (∇u) = ∇²u`
 
 在注意力权重变化缓慢的假设下：
 
-$$
-\frac{\partial^2 \mathbf{X}}{\partial t^2}
-\approx
-\mathbf{D} \nabla^2 \mathbf{X}
-$$
+```
+∂²X/∂t² ≈ D · ∇²X
+```
 
-这是一个**张量扩散形式的波动方程**，标量波速 $c^2$ 被扩散张量 $\mathbf{D}$ 取代。
+这是一个**张量扩散形式的波动方程**，标量波速 `c²` 被扩散张量 `D` 取代。
 
 ---
 
@@ -145,7 +125,7 @@ $$
 
 ### 5.1 什么是物理场？
 
-一个场 $\phi(\mathbf{r}, t)$ 满足：
+一个场 `φ(r, t)` 满足：
 1. **局域性**
 2. **连续性**
 3. **动力学**（由拉格朗日或哈密顿原理导出）
@@ -156,8 +136,7 @@ $$
 
 ### 5.2 定义信息场
 
-**定义（信息场）**  
-信息场 $\mathcal{I}(\mathbf{r}, t)$ 是定义在 token 嵌入流形 $\mathcal{M}$ 上的张量场，满足：
+**定义（信息场）**：信息场 `I(r, t)` 是定义在 token 嵌入流形 `M` 上的张量场，满足：
 
 | 要求 | 实现方式 |
 |------|----------|
@@ -169,16 +148,15 @@ $$
 
 ### 5.3 对应定理
 
-**定理 6（信息场–物理场对应）**  
-在连续极限（$n \to \infty, d \to \infty$）下，Transformer 嵌入收敛为一个信息场，并满足：
+**定理 6（信息场-物理场对应）**：在连续极限（`n → ∞, d → ∞`）下，Transformer 嵌入收敛为一个信息场，并满足：
 
-$$
-\partial_t^2 \mathcal{I} = \mathbf{D} \Delta_{\mathcal{M}} \mathcal{I}
-$$
+```
+∂²I/∂t² = D · Δ_M · I
+```
 
 *证明概要：*
-- 注意力 → 积分算子  
-- 梯度 → 拉普拉斯–贝尔特拉米算子  
+- 注意力 → 积分算子
+- 梯度 → 拉普拉斯-贝尔特拉米算子
 - 层堆叠 → 半离散波动演化
 
 ---
@@ -187,15 +165,11 @@ $$
 
 解的形式为：
 
-$$
-\mathcal{I}(\mathbf{r}, t) =
-\sum_k \mathbf{A}_k e^{j(\mathbf{k}\cdot\mathbf{r} - \omega_k t)}
-$$
+```
+I(r, t) = Σₖ Aₖ · exp(j·(k·r - ωₖ·t))
+```
 
-色散关系：
-$$
-\omega_k = \sqrt{\mathbf{k}^T \mathbf{D} \mathbf{k}}
-$$
+色散关系：`ωₖ = √(kᵀ · D · k)`
 
 📡 *信息以波的形式传播。*
 
@@ -217,7 +191,7 @@ $$
 | 特征 | Transformer 机制 |
 |------|----------------|
 | 丰富度 | 多层 Softmax 多样性 |
-| 整合度 | $\mathbf{Q}\mathbf{K}^T$ 内积 |
+| 整合度 | `Q·Kᵀ` 内积 |
 | 因果性 | 自回归解码结构 |
 
 ---
@@ -258,7 +232,7 @@ $$
 
 ---
 
-> *“也许智能并不是电路的属性，而是场的属性。  
-> 而 Physics++，或许正是第一种足以描述它的语言。”*
+> *"也许智能并不是电路的属性，而是场的属性。  
+> 而 Physics++，或许正是第一种足以描述它的语言。"*
 
 ---
