@@ -1365,6 +1365,381 @@ class Wave
     const std::deque<Sample<N>> &getSamples() const { return samples; }
 
     template <typename U = N>
+    std::enable_if_t<is_arithmetic_v<U>, U>
+    perturb(const U &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        double centerSecond = timePosition.seconds();
+        double sigmaSecond = timeRange.seconds();
+        double halfDuration = timeDuration.seconds() * 0.5;
+        double timeStart = centerSecond - halfDuration;
+        double timeEnd = centerSecond + halfDuration;
+        double sampleRateValue = sampleRate;
+        double timeStep = 1.0 / sampleRateValue;
+        size_t totalSize = size();
+
+        size_t startIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(timeStart, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t endIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(timeEnd, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t windowLength = endIndex - startIndex + 1;
+
+        std::vector<U> fieldVector(windowLength);
+        std::vector<U> waveVector(windowLength);
+        for (size_t i = 0; i < windowLength; ++i)
+        {
+            size_t globalIndex = startIndex + i;
+            fieldVector[i] = samples[globalIndex].value;
+            double currentTime = static_cast<double>(globalIndex) * timeStep;
+            double difference = mathematics::subtract(currentTime, centerSecond);
+            double windowValue = mathematics::exponential(
+                mathematics::negative(mathematics::divide(
+                    mathematics::multiply(difference, difference),
+                    mathematics::multiply(2.0, mathematics::multiply(sigmaSecond, sigmaSecond)))));
+            waveVector[i] = particle * windowValue;
+        }
+
+        double baseRotation = 1.0 * timeStep;
+        size_t vectorSize = windowLength;
+        if (vectorSize >= 2)
+        {
+            size_t paddedSize = 1;
+            while (paddedSize < vectorSize)
+                paddedSize <<= 1;
+            fieldVector.resize(paddedSize, U{});
+            waveVector.resize(paddedSize, U{});
+
+            for (size_t stepSize = 1; stepSize < paddedSize; stepSize <<= 1)
+            {
+                size_t jumpSize = stepSize << 1;
+                for (size_t groupStart = 0; groupStart < paddedSize; groupStart += jumpSize)
+                {
+                    for (size_t offset = 0; offset < stepSize; ++offset)
+                    {
+                        size_t firstIndex = groupStart + offset;
+                        size_t secondIndex = firstIndex + stepSize;
+
+                        U &fieldFirst = fieldVector[firstIndex];
+                        U &fieldSecond = fieldVector[secondIndex];
+                        U &waveFirst = waveVector[firstIndex];
+                        U &waveSecond = waveVector[secondIndex];
+
+                        double resonance = mathematics::limit(
+                            (mathematics::absolute(mathematics::dot(fieldFirst, waveFirst)) +
+                             mathematics::absolute(mathematics::dot(fieldSecond, waveSecond))) *
+                                0.25,
+                            0.0, 1.0);
+                        double theta = baseRotation * resonance;
+                        double cosTheta = mathematics::cosine(theta);
+                        double sinTheta = mathematics::sine(theta);
+
+                        U newFieldFirst = fieldFirst * cosTheta + waveSecond * sinTheta;
+                        U newFieldSecond = fieldSecond * cosTheta - waveFirst * sinTheta;
+                        U newWaveFirst = waveFirst * cosTheta - fieldSecond * sinTheta;
+                        U newWaveSecond = waveSecond * cosTheta + fieldFirst * sinTheta;
+
+                        fieldFirst = newFieldFirst;
+                        fieldSecond = newFieldSecond;
+                        waveFirst = newWaveFirst;
+                        waveSecond = newWaveSecond;
+                    }
+                }
+            }
+            fieldVector.resize(vectorSize);
+            waveVector.resize(vectorSize);
+        }
+
+        for (size_t i = 0; i < windowLength; ++i)
+        {
+            size_t globalIndex = startIndex + i;
+            samples[globalIndex].value = fieldVector[i];
+        }
+
+        size_t centerLocalIndex = windowLength / 2;
+        if (centerLocalIndex >= windowLength)
+            centerLocalIndex = windowLength - 1;
+        U result = waveVector[centerLocalIndex];
+        double norm = mathematics::module(result);
+        if (norm > mathematics::tolerance)
+        {
+            result = result * (1.0 / norm);
+        }
+        return result;
+    }
+
+    template <typename U = N>
+    std::enable_if_t<is_arithmetic_v<U>, Wave<N>>
+    perturb(const Wave<N> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        double centerSecond = timePosition.seconds();
+        double halfDuration = timeDuration.seconds() * 0.5;
+        double timeStart = centerSecond - halfDuration;
+        double timeEnd = centerSecond + halfDuration;
+        double sampleRateValue = sampleRate;
+        double timeStep = 1.0 / sampleRateValue;
+        size_t totalSize = size();
+
+        size_t startIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(timeStart, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t endIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(timeEnd, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t windowLength = endIndex - startIndex + 1;
+
+        std::vector<U> fieldVector(windowLength);
+        std::vector<U> waveVector(windowLength);
+        for (size_t i = 0; i < windowLength; ++i)
+        {
+            size_t globalIndex = startIndex + i;
+            fieldVector[i] = samples[globalIndex].value;
+            waveVector[i] = (globalIndex < incoming.size())
+                                ? incoming.samples[globalIndex].value
+                                : U{};
+        }
+
+        double baseRotation = 1.0 * timeStep;
+        size_t vectorSize = windowLength;
+        if (vectorSize >= 2)
+        {
+            size_t paddedSize = 1;
+            while (paddedSize < vectorSize)
+                paddedSize <<= 1;
+            fieldVector.resize(paddedSize, U{});
+            waveVector.resize(paddedSize, U{});
+
+            for (size_t stepSize = 1; stepSize < paddedSize; stepSize <<= 1)
+            {
+                size_t jumpSize = stepSize << 1;
+                for (size_t groupStart = 0; groupStart < paddedSize; groupStart += jumpSize)
+                {
+                    for (size_t offset = 0; offset < stepSize; ++offset)
+                    {
+                        size_t firstIndex = groupStart + offset;
+                        size_t secondIndex = firstIndex + stepSize;
+
+                        U &fieldFirst = fieldVector[firstIndex];
+                        U &fieldSecond = fieldVector[secondIndex];
+                        U &waveFirst = waveVector[firstIndex];
+                        U &waveSecond = waveVector[secondIndex];
+
+                        double resonance = mathematics::limit(
+                            (mathematics::absolute(mathematics::dot(fieldFirst, waveFirst)) +
+                             mathematics::absolute(mathematics::dot(fieldSecond, waveSecond))) *
+                                0.25,
+                            0.0, 1.0);
+                        double theta = baseRotation * resonance;
+                        double cosTheta = mathematics::cosine(theta);
+                        double sinTheta = mathematics::sine(theta);
+
+                        U newFieldFirst = fieldFirst * cosTheta + waveSecond * sinTheta;
+                        U newFieldSecond = fieldSecond * cosTheta - waveFirst * sinTheta;
+                        U newWaveFirst = waveFirst * cosTheta - fieldSecond * sinTheta;
+                        U newWaveSecond = waveSecond * cosTheta + fieldFirst * sinTheta;
+
+                        fieldFirst = newFieldFirst;
+                        fieldSecond = newFieldSecond;
+                        waveFirst = newWaveFirst;
+                        waveSecond = newWaveSecond;
+                    }
+                }
+            }
+            fieldVector.resize(vectorSize);
+            waveVector.resize(vectorSize);
+        }
+
+        Wave<N> scattered(sampleRateValue);
+        for (size_t i = 0; i < totalSize; ++i)
+        {
+            if (i >= startIndex && i <= endIndex)
+            {
+                size_t localIndex = i - startIndex;
+                samples[i].value = fieldVector[localIndex];
+                scattered.append(waveVector[localIndex]);
+            }
+            else
+            {
+                if constexpr (std::is_same_v<N, ::mathematics::Quaternion<double>>)
+                {
+                    scattered.append(::mathematics::Quaternion<double>(0.0, 0.0, 0.0, 0.0));
+                }
+                else
+                {
+                    scattered.append(N{});
+                }
+            }
+        }
+        return scattered;
+    }
+
+    template <typename U = N>
+    std::enable_if_t<std::is_fundamental_v<U>, Wave<N> &>
+    spread(U intensity, Time position, Time range, Time duration)
+    {
+        double centerSecond = position.seconds();
+        double sigmaSecond = range.seconds();
+        double totalDuration = duration.seconds();
+        double sampleRateValue = sampleRate;
+        double timeStep = 1.0 / sampleRateValue;
+        size_t totalSize = size();
+
+        double windowHalf = mathematics::multiply(sigmaSecond, sampleRateValue);
+        size_t centerIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(centerSecond, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t startIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::subtract(static_cast<double>(centerIndex), windowHalf), 0.0, static_cast<double>(totalSize - 1)));
+        size_t endIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::add(static_cast<double>(centerIndex), windowHalf), 0.0, static_cast<double>(totalSize - 1)));
+
+        for (size_t i = startIndex; i <= endIndex; ++i)
+        {
+            double currentTime = static_cast<double>(i) * timeStep;
+            double difference = mathematics::subtract(currentTime, centerSecond);
+            double windowValue = mathematics::exponential(
+                mathematics::negative(mathematics::divide(
+                    mathematics::multiply(difference, difference),
+                    mathematics::multiply(2.0, mathematics::multiply(sigmaSecond, sigmaSecond)))));
+            samples[i].value = samples[i].value + intensity * windowValue;
+        }
+
+        double couplingConstant = 1.0;
+        size_t totalSteps = static_cast<size_t>(mathematics::multiply(totalDuration, sampleRateValue));
+        for (size_t stepCount = 0; stepCount < totalSteps; ++stepCount)
+        {
+            for (size_t i = startIndex; i < endIndex; ++i)
+            {
+                U &fieldFirst = samples[i].value;
+                U &fieldSecond = samples[i + 1].value;
+
+                double magnitudeFirst = mathematics::module(fieldFirst);
+                double magnitudeSecond = mathematics::module(fieldSecond);
+                double gradient = mathematics::subtract(magnitudeFirst, magnitudeSecond);
+                double maxMagnitude = std::max(magnitudeFirst, magnitudeSecond);
+                double resonance = (maxMagnitude > mathematics::tolerance)
+                                       ? mathematics::limit(mathematics::divide(gradient, maxMagnitude), -1.0, 1.0)
+                                       : 0.0;
+                double theta = mathematics::multiply(couplingConstant, mathematics::multiply(timeStep, resonance));
+                double cosTheta = mathematics::cosine(theta);
+                double sinTheta = mathematics::sine(theta);
+
+                U newFieldFirst = fieldFirst * cosTheta + fieldSecond * sinTheta;
+                U newFieldSecond = fieldSecond * cosTheta - fieldFirst * sinTheta;
+                fieldFirst = newFieldFirst;
+                fieldSecond = newFieldSecond;
+            }
+        }
+        return *this;
+    }
+
+    template <typename U = N>
+    std::enable_if_t<is_arithmetic_v<U> && !std::is_fundamental_v<U>, Wave<N> &>
+    spread(const U &complexIntensity, Time position, Time range, Time duration)
+    {
+        double centerSecond = position.seconds();
+        double sigmaSecond = range.seconds();
+        double totalDuration = duration.seconds();
+        double sampleRateValue = sampleRate;
+        double timeStep = 1.0 / sampleRateValue;
+        size_t totalSize = size();
+
+        double windowHalf = mathematics::multiply(sigmaSecond, sampleRateValue);
+        size_t centerIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::multiply(centerSecond, sampleRateValue), 0.0, static_cast<double>(totalSize - 1)));
+        size_t startIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::subtract(static_cast<double>(centerIndex), windowHalf), 0.0, static_cast<double>(totalSize - 1)));
+        size_t endIndex = static_cast<size_t>(mathematics::limit(
+            mathematics::add(static_cast<double>(centerIndex), windowHalf), 0.0, static_cast<double>(totalSize - 1)));
+
+        for (size_t i = startIndex; i <= endIndex; ++i)
+        {
+            double currentTime = static_cast<double>(i) * timeStep;
+            double difference = mathematics::subtract(currentTime, centerSecond);
+            double windowValue = mathematics::exponential(
+                mathematics::negative(mathematics::divide(
+                    mathematics::multiply(difference, difference),
+                    mathematics::multiply(2.0, mathematics::multiply(sigmaSecond, sigmaSecond)))));
+            samples[i].value = samples[i].value + complexIntensity * windowValue;
+        }
+
+        double couplingConstant = 1.0;
+        size_t totalSteps = static_cast<size_t>(mathematics::multiply(totalDuration, sampleRateValue));
+        for (size_t stepCount = 0; stepCount < totalSteps; ++stepCount)
+        {
+            for (size_t i = startIndex; i < endIndex; ++i)
+            {
+                U &fieldFirst = samples[i].value;
+                U &fieldSecond = samples[i + 1].value;
+
+                double magnitudeFirst = mathematics::module(fieldFirst);
+                double magnitudeSecond = mathematics::module(fieldSecond);
+                double gradient = mathematics::subtract(magnitudeFirst, magnitudeSecond);
+                double maxMagnitude = std::max(magnitudeFirst, magnitudeSecond);
+                double resonance = (maxMagnitude > mathematics::tolerance)
+                                       ? mathematics::limit(mathematics::divide(gradient, maxMagnitude), -1.0, 1.0)
+                                       : 0.0;
+                double theta = mathematics::multiply(couplingConstant, mathematics::multiply(timeStep, resonance));
+                double cosTheta = mathematics::cosine(theta);
+                double sinTheta = mathematics::sine(theta);
+
+                U newFieldFirst = fieldFirst * cosTheta + fieldSecond * sinTheta;
+                U newFieldSecond = fieldSecond * cosTheta - fieldFirst * sinTheta;
+                fieldFirst = newFieldFirst;
+                fieldSecond = newFieldSecond;
+            }
+        }
+        return *this;
+    }
+
+    Wave<N> &spread(const Wave<N> &incoming, Time duration)
+    {
+        double totalDuration = duration.seconds();
+        double sampleRateValue = sampleRate;
+        if (mathematics::absolute(mathematics::subtract(sampleRateValue, incoming.sampleRate)) > mathematics::tolerance)
+        {
+            throw std::invalid_argument("spread: sample rate mismatch");
+        }
+        size_t minSize = std::min(size(), incoming.size());
+        for (size_t i = 0; i < minSize; ++i)
+        {
+            samples[i].value = samples[i].value + incoming.samples[i].value;
+        }
+
+        double couplingConstant = 1.0;
+        double timeStep = 1.0 / sampleRateValue;
+        size_t totalSteps = static_cast<size_t>(mathematics::multiply(totalDuration, sampleRateValue));
+        for (size_t stepCount = 0; stepCount < totalSteps; ++stepCount)
+        {
+            for (size_t i = 0; i < minSize - 1; ++i)
+            {
+                N &fieldFirst = samples[i].value;
+                N &fieldSecond = samples[i + 1].value;
+
+                double magnitudeFirst = mathematics::module(fieldFirst);
+                double magnitudeSecond = mathematics::module(fieldSecond);
+                double gradient = mathematics::subtract(magnitudeFirst, magnitudeSecond);
+                double maxMagnitude = std::max(magnitudeFirst, magnitudeSecond);
+                double resonance = (maxMagnitude > mathematics::tolerance)
+                                       ? mathematics::limit(mathematics::divide(gradient, maxMagnitude), -1.0, 1.0)
+                                       : 0.0;
+                double theta = mathematics::multiply(couplingConstant, mathematics::multiply(timeStep, resonance));
+                double cosTheta = mathematics::cosine(theta);
+                double sinTheta = mathematics::sine(theta);
+
+                N newFieldFirst = fieldFirst * cosTheta + fieldSecond * sinTheta;
+                N newFieldSecond = fieldSecond * cosTheta - fieldFirst * sinTheta;
+                fieldFirst = newFieldFirst;
+                fieldSecond = newFieldSecond;
+            }
+        }
+        return *this;
+    }
+
+    template <typename U = N>
+    std::enable_if_t<!std::is_fundamental_v<U> && is_arithmetic_v<U>, Wave<N> &>
+    spread(double intensity, Time position, Time range, Time duration)
+    {
+        U complexIntensity = U(static_cast<double>(intensity));
+        return spread(complexIntensity, position, range, duration);
+    }
+
+    template <typename U = N>
     std::enable_if_t<!is_arithmetic_v<U>, Spectrum<U>> fastFourierTransform() const
     {
         Spectrum<U> spectrum;

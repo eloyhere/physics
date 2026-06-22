@@ -95,122 +95,53 @@ class Field
         }
     }
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta)
+    T perturb(const T &particle, Time timePosition, Time timeRange, Time timeDuration)
     {
-        size_t minSize = std::min(wave.size(), delta.size());
-        if (minSize == 0)
+        ::mathematics::Quaternion<double> particleQ = to(particle);
+        ::mathematics::Quaternion<double> scatteredQ = wave.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return from(scatteredQ);
+    }
+
+    Wave<T> perturb(const Wave<T> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
         {
-            return;
+            incomingQ.append(to(incoming[i]));
         }
-
-        std::vector<double> resonance(minSize, 0.0);
-        bool hasExistingField = false;
-        for (size_t i = 0; i < minSize; ++i)
+        Wave<::mathematics::Quaternion<double>> scatteredQ = wave.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<T> scattered(incoming.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
         {
-            double dotProduct = wave[i].dot(delta[i]);
-            resonance[i] = ::mathematics::absolute(dotProduct);
-            if (wave[i].dot(wave[i]) > ::mathematics::tolerance)
-            {
-                hasExistingField = true;
-            }
+            scattered.append(from(scatteredQ[i]));
         }
+        return scattered;
+    }
 
-        if (!hasExistingField)
+    Field &spread(double intensity, Time position, Time range, Time duration)
+    {
+        wave.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    template <typename U = T>
+    std::enable_if_t<is_arithmetic_v<U> && !std::is_fundamental_v<U>, Field &>
+    spread(const T &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ = to(complexIntensity);
+        wave.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field &spread(const Wave<T> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
         {
-            for (size_t i = 0; i < minSize; ++i)
-            {
-                wave[i] = wave[i] + delta[i];
-            }
-
-            double sigma = 3.0;
-            double sigmaSquared = ::mathematics::multiply(2.0, ::mathematics::multiply(sigma, sigma));
-            Wave<::mathematics::Quaternion<double>> result(wave.getSampleRate());
-            for (size_t i = 0; i < wave.size(); ++i)
-            {
-                result.append(wave[i]);
-            }
-
-            for (size_t i = 0; i < wave.size(); ++i)
-            {
-                ::mathematics::Quaternion<double> weightedSum(0.0, 0.0, 0.0, 0.0);
-                double totalWeight = 0.0;
-
-                for (size_t j = 0; j < minSize; ++j)
-                {
-                    double distance = ::mathematics::subtract(static_cast<double>(j), static_cast<double>(i));
-                    double weight = ::mathematics::exponential(
-                        ::mathematics::negative(::mathematics::divide(
-                            ::mathematics::multiply(distance, distance), sigmaSquared)));
-
-                    weightedSum = weightedSum + delta[j] * weight;
-                    totalWeight = ::mathematics::add(totalWeight, weight);
-                }
-
-                if (totalWeight > ::mathematics::tolerance)
-                {
-                    double scale = ::mathematics::divide(1.0, totalWeight);
-                    result[i] = wave[i] + weightedSum * scale;
-                }
-            }
-            wave = std::move(result);
-            return;
+            incomingQ.append(to(incoming[i]));
         }
-
-        double maxResonance = 0.0;
-        for (size_t i = 0; i < minSize; ++i)
-        {
-            if (resonance[i] > maxResonance)
-            {
-                maxResonance = resonance[i];
-            }
-        }
-        if (maxResonance < ::mathematics::tolerance)
-        {
-            return;
-        }
-        for (size_t i = 0; i < minSize; ++i)
-        {
-            resonance[i] = ::mathematics::divide(resonance[i], maxResonance);
-        }
-
-        for (size_t i = 0; i < minSize; ++i)
-        {
-            wave[i] = wave[i] + delta[i] * resonance[i];
-        }
-
-        double sigma = 3.0;
-        double sigmaSquared = ::mathematics::multiply(2.0, ::mathematics::multiply(sigma, sigma));
-        Wave<::mathematics::Quaternion<double>> smoothed(wave.getSampleRate());
-        for (size_t i = 0; i < wave.size(); ++i)
-        {
-            smoothed.append(wave[i]);
-        }
-
-        for (size_t i = 0; i < wave.size(); ++i)
-        {
-            ::mathematics::Quaternion<double> weightedSum(0.0, 0.0, 0.0, 0.0);
-            double totalWeight = 0.0;
-
-            for (size_t j = 0; j < minSize; ++j)
-            {
-                double distance = ::mathematics::subtract(static_cast<double>(j), static_cast<double>(i));
-                double weight = ::mathematics::exponential(
-                    ::mathematics::negative(::mathematics::divide(
-                        ::mathematics::multiply(distance, distance), sigmaSquared)));
-
-                if (resonance[j] > ::mathematics::tolerance)
-                {
-                    weightedSum = weightedSum + (wave[j] - smoothed[j]) * (weight * resonance[j]);
-                    totalWeight = ::mathematics::add(totalWeight, ::mathematics::multiply(weight, resonance[j]));
-                }
-            }
-
-            if (totalWeight > ::mathematics::tolerance)
-            {
-                double scale = ::mathematics::divide(1.0, totalWeight);
-                wave[i] = smoothed[i] + weightedSum * scale;
-            }
-        }
+        wave.spread(incomingQ, duration);
+        return *this;
     }
 
     T displacement(const Time &time) const
@@ -529,7 +460,50 @@ class Field<Voltage>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Voltage &value) : field(sampleRate, size, value.phasor().complex()) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Voltage perturb(const Voltage &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Complex<double> scattered = field.perturb(particle.phasor().complex(), timePosition, timeRange, timeDuration);
+        return Voltage(Phasor(scattered));
+    }
+
+    Wave<Voltage> perturb(const Wave<Voltage> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Complex<double>> incomingComplex(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            incomingComplex.append(incoming[i].phasor().complex());
+        }
+        Wave<::mathematics::Complex<double>> scatteredComplex = field.perturb(incomingComplex, timePosition, timeRange, timeDuration);
+        Wave<Voltage> scattered(scatteredComplex.getSampleRate());
+        for (size_t i = 0; i < scatteredComplex.size(); ++i)
+        {
+            scattered.append(Voltage(Phasor(scatteredComplex[i])));
+        }
+        return scattered;
+    }
+
+    Field<Voltage> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Voltage> &spread(const Voltage &complexIntensity, Time position, Time range, Time duration)
+    {
+        field.spread(complexIntensity.phasor().complex(), position, range, duration);
+        return *this;
+    }
+
+    Field<Voltage> &spread(const Wave<Voltage> &incoming, Time duration)
+    {
+        Wave<::mathematics::Complex<double>> incomingComplex(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            incomingComplex.append(incoming[i].phasor().complex());
+        }
+        field.spread(incomingComplex, duration);
+        return *this;
+    }
 
     Voltage displacement(const Time &time) const { return Voltage(Phasor(field.displacement(time))); }
     Voltage velocity(const Time &time) const { return Voltage(Phasor(field.velocity(time))); }
@@ -621,7 +595,50 @@ class Field<Current>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Current &value) : field(sampleRate, size, value.phasor().complex()) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Current perturb(const Current &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Complex<double> scattered = field.perturb(particle.phasor().complex(), timePosition, timeRange, timeDuration);
+        return Current(Phasor(scattered));
+    }
+
+    Wave<Current> perturb(const Wave<Current> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Complex<double>> incomingComplex(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            incomingComplex.append(incoming[i].phasor().complex());
+        }
+        Wave<::mathematics::Complex<double>> scatteredComplex = field.perturb(incomingComplex, timePosition, timeRange, timeDuration);
+        Wave<Current> scattered(scatteredComplex.getSampleRate());
+        for (size_t i = 0; i < scatteredComplex.size(); ++i)
+        {
+            scattered.append(Current(Phasor(scatteredComplex[i])));
+        }
+        return scattered;
+    }
+
+    Field<Current> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Current> &spread(const Current &complexIntensity, Time position, Time range, Time duration)
+    {
+        field.spread(complexIntensity.phasor().complex(), position, range, duration);
+        return *this;
+    }
+
+    Field<Current> &spread(const Wave<Current> &incoming, Time duration)
+    {
+        Wave<::mathematics::Complex<double>> incomingComplex(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            incomingComplex.append(incoming[i].phasor().complex());
+        }
+        field.spread(incomingComplex, duration);
+        return *this;
+    }
 
     Current displacement(const Time &time) const { return Current(Phasor(field.displacement(time))); }
     Current velocity(const Time &time) const { return Current(Phasor(field.velocity(time))); }
@@ -713,7 +730,54 @@ class Field<Force>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Force &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Force perturb(const Force &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Force(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Force> perturb(const Wave<Force> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Force f = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, f.x(), f.y(), f.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Force> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Force(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Force> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Force> &spread(const Force &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Force> &spread(const Wave<Force> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Force f = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, f.x(), f.y(), f.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Force displacement(const Time &time) const
     {
@@ -817,7 +881,54 @@ class Field<Displacement>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Displacement &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Displacement perturb(const Displacement &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Displacement(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Displacement> perturb(const Wave<Displacement> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Displacement d = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, d.x(), d.y(), d.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Displacement> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Displacement(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Displacement> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Displacement> &spread(const Displacement &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Displacement> &spread(const Wave<Displacement> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Displacement d = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, d.x(), d.y(), d.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Displacement displacement(const Time &time) const
     {
@@ -921,7 +1032,54 @@ class Field<Velocity>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Velocity &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Velocity perturb(const Velocity &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Velocity(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Velocity> perturb(const Wave<Velocity> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Velocity v = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, v.x(), v.y(), v.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Velocity> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Velocity(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Velocity> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Velocity> &spread(const Velocity &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Velocity> &spread(const Wave<Velocity> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Velocity v = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, v.x(), v.y(), v.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Velocity displacement(const Time &time) const
     {
@@ -1025,7 +1183,54 @@ class Field<Acceleration>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Acceleration &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Acceleration perturb(const Acceleration &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Acceleration(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Acceleration> perturb(const Wave<Acceleration> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Acceleration a = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, a.x(), a.y(), a.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Acceleration> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Acceleration(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Acceleration> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Acceleration> &spread(const Acceleration &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Acceleration> &spread(const Wave<Acceleration> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Acceleration a = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, a.x(), a.y(), a.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Acceleration displacement(const Time &time) const
     {
@@ -1129,7 +1334,54 @@ class Field<Momentum>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Momentum &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Momentum perturb(const Momentum &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Momentum(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Momentum> perturb(const Wave<Momentum> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Momentum p = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, p.x(), p.y(), p.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Momentum> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Momentum(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Momentum> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Momentum> &spread(const Momentum &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Momentum> &spread(const Wave<Momentum> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Momentum p = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, p.x(), p.y(), p.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Momentum displacement(const Time &time) const
     {
@@ -1233,7 +1485,54 @@ class Field<Torque>
     Field(double sampleRate, size_t size) : field(sampleRate, size) {}
     Field(double sampleRate, size_t size, const Torque &value) : field(sampleRate, size, ::mathematics::Quaternion<double>(0.0, static_cast<double>(value.x()), static_cast<double>(value.y()), static_cast<double>(value.z()))) {}
 
-    void perturb(const Wave<::mathematics::Quaternion<double>> &delta) { field.perturb(delta); }
+    Torque perturb(const Torque &particle, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        ::mathematics::Quaternion<double> particleQ(0.0, particle.x(), particle.y(), particle.z());
+        ::mathematics::Quaternion<double> scatteredQ = field.perturb(particleQ, timePosition, timeRange, timeDuration);
+        return Torque(scatteredQ.getImagI(), scatteredQ.getImagJ(), scatteredQ.getImagK());
+    }
+
+    Wave<Torque> perturb(const Wave<Torque> &incoming, Time timePosition, Time timeRange, Time timeDuration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Torque t = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, t.x(), t.y(), t.z()));
+        }
+        Wave<::mathematics::Quaternion<double>> scatteredQ = field.perturb(incomingQ, timePosition, timeRange, timeDuration);
+        Wave<Torque> scattered(scatteredQ.getSampleRate());
+        for (size_t i = 0; i < scatteredQ.size(); ++i)
+        {
+            scattered.append(Torque(scatteredQ[i].getImagI(), scatteredQ[i].getImagJ(), scatteredQ[i].getImagK()));
+        }
+        return scattered;
+    }
+
+    Field<Torque> &spread(double intensity, Time position, Time range, Time duration)
+    {
+        field.spread(intensity, position, range, duration);
+        return *this;
+    }
+
+    Field<Torque> &spread(const Torque &complexIntensity, Time position, Time range, Time duration)
+    {
+        ::mathematics::Quaternion<double> intensityQ(0.0, complexIntensity.x(), complexIntensity.y(), complexIntensity.z());
+        field.spread(intensityQ, position, range, duration);
+        return *this;
+    }
+
+    Field<Torque> &spread(const Wave<Torque> &incoming, Time duration)
+    {
+        Wave<::mathematics::Quaternion<double>> incomingQ(incoming.getSampleRate());
+        for (size_t i = 0; i < incoming.size(); ++i)
+        {
+            Torque t = incoming[i];
+            incomingQ.append(::mathematics::Quaternion<double>(0.0, t.x(), t.y(), t.z()));
+        }
+        field.spread(incomingQ, duration);
+        return *this;
+    }
 
     Torque displacement(const Time &time) const
     {
@@ -1328,3 +1627,34 @@ class Field<Torque>
 };
 
 } // namespace physics
+
+namespace std
+{
+template <typename T>
+struct hash<physics::Field<T>>
+{
+    size_t operator()(const physics::Field<T> &field) const
+    {
+        const physics::Wave<::mathematics::Quaternion<double>> &wave = field.getWave();
+        size_t seed = 0;
+        for (size_t i = 0; i < wave.size(); ++i)
+        {
+            const ::mathematics::Quaternion<double> &q = wave[i];
+            seed ^= hash<double>{}(q.getReal()) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= hash<double>{}(q.getImagI()) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= hash<double>{}(q.getImagJ()) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= hash<double>{}(q.getImagK()) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+template <typename T>
+struct less<physics::Field<T>>
+{
+    bool operator()(const physics::Field<T> &left, const physics::Field<T> &right) const
+    {
+        return left < right;
+    }
+};
+} // namespace std
